@@ -127,8 +127,8 @@
         <td>代码区</td>
     </tr>
 </table> 
-&emsp;内存分配图示@[图片来源](http://blog.sae.sina.com.cn/archives/3202)
-<img src="./03.jpg" width="400" height="400" alt="内存分配图示"/>
+&emsp;内存分配图示@[图片来源](http://blog.sae.sina.com.cn/archives/3202)  
+<img src="./03.jpg" width="400" height="400" alt="内存分配图示"/>  
 &emsp;由于.text段，.data段和.text段的大小在程序编译之前是未知的，因此我们的链接器引入了一个定位计数器，就是下面的小点:
   
 	OUTPUT_ARCH(mips)
@@ -164,8 +164,8 @@
 	.bss : { *(.bss) }
 	end = . ;  
 &emsp;所以就在自己的虚拟器上试了一下，这样的写法运行起来居然没有问题。考虑到我们的main函数其实相当地简单，所以容错率也是极高。将.data段和.bss段放到0x80400000后面其实是放错了位置的。  
-&emsp;内存分配图示@[图片来源](http://blog.sae.sina.com.cn/archives/3202)
-<img src="./03.jpg" width="400" height="400" alt="内存分配图示"/>
+&emsp;内存分配图示@[图片来源](http://blog.sae.sina.com.cn/archives/3202)  
+<img src="./03.jpg" width="400" height="400" alt="内存分配图示"/>  
 &emsp;从图中可知，栈区以上为命令行参数以及环境变量的存储分区，但是我们的程序中并没有涉及到命令行参数。所以放在此处也没有问题。 尝试了一下设置在栈上:  
 <img src="./link0.png" alt="link0">  
 &emsp;在main函数中设置已初始化的数组  
@@ -177,12 +177,12 @@
 &emsp;然后又突然想到，倘若让.data或者.bss段跟栈区又重叠，那么会发生什么情况呢？于是将.data的起始地址设置在栈区中  
 <img src="./link1.png" alt="link1">    
 &emsp;run了一下，在gxemul中把数据dump了出来，结果画面太美不能看。我们的全局变量已经面目全非了。  
-<img src="./dump1.png" alt="dump1">
-&emsp;输出也是乱码。
+<img src="./dump1.png" alt="dump1">  
+&emsp;输出也是乱码。  
 <img src="./output1.png" alt="output1">  
 &emsp;最后顺便验证了一下，初始化为0的全局变量不是保存在.data段中而是保存在.bss段中的。因此修改main.c如下:  
 <img src="./main2.png" alt="main2">  
-&emsp;运行dump出内存中的.data段数据:
+&emsp;运行dump出内存中的.data段数据:  
 <img src="./dump2.png" alt="dump2">  
 &emsp;从这段数据可以得知虽然上述的m数组进行了初始化但是并没有被放置在n和a数组之中，所以验证应该是成立的。尽管如此，n数组和a数组中初始化为0的元素却没有被进行"特殊"处理，所以觉得这里还是有一些特殊的机制的。  
 以上就是我在本次实验中的一些收获，我觉得本次实验中最重要的还是学会调试。剩下的问题就是对linux命令行和git的学习了。git也是一门大学问，希望有机会跟大家一起探讨。

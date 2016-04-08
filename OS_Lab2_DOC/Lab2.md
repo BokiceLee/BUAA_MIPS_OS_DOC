@@ -32,8 +32,8 @@
 &emsp;在`include/types.h`中定义了这样的两个宏,    
 
 	/* Rounding; only works for n = power of two */
-	#define ROUND(a, n)     (((((u_long)(a))+(n)-1)) & ~((n)-1))
-	##define ROUNDDOWN(a, n) (((u_long)(a)) & ~((n)-1))
+	\#define ROUND(a, n)     (((((u_long)(a))+(n)-1)) & ~((n)-1))
+	\#define ROUNDDOWN(a, n) (((u_long)(a)) & ~((n)-1))
 &emsp;这里以第一个宏`ROUND(a,n)`进行分析，该宏接受`a`,`n`两个参数，因为`n = power of two`，设其指数为`m`，则`(n)-1`为`m`个`1`组成的二进制数，`~((n)-1)`为`m`个`0`组成的二进制数，当`a`的低`m`位不全为0时，显然`((((u_long)(a))+(n)-1))`在第`m+1`位增加1，则`(((((u_long)(a))+(n)-1)) & ~((n)-1))`的结果是`a`的第`m+1`位增加1，且低`m`位全为0，即__上对齐__。    
 &emsp;同理可知宏`ROUNDDOWN(a,n)`的作用为__下对齐__。    
 &emsp;显然我们在`alloc`函数中应该将内存地址上对齐，否则将导致数据的混淆。因此引用宏`ROUND(a,n)`。

@@ -103,7 +103,7 @@
 	}
 
 既然我们已经能够分配指定字节数的内存了，就在这个基础上编写粒度更大的分配函数，即以页(4k)为单位分配内存。
-##2、page\_init函数
+##2.page\_init函数
 首先是page\_init函数，这也是Exercise2.2的要求。
 > Exercise 2.2 完成 page\_init 函数，使用 include/queue.h 中定义的宏函数将未分配的物理页加入到空闲链表 page\_free\_list 中去。思考如何区分已分配的内存块和未分配的内存块，并注意内核可用的物理内存上限    
 
@@ -120,38 +120,139 @@
 
 	struct Page {
  		Page_LIST_entry_t pp_link;
+		/* free list link */
+
+        // Ref is the count of pointers (usually in page table entries)^M
+        // to this page.  This only holds for pages allocated using ^M
+        // page_alloc.  Pages allocated at boot time using pmap.c's "alloc"^M
+        // do not have valid reference count fields.^M
+
  		u_short pp_ref;
 	};
 &emsp;再看看`Page_LIST_entry_t`:
 
 	typedef struct { struct Page *le_next; struct Page **le_prev; } Page_LIST_entry_t;
-
-#(未完带续，先攀岩去==
-
+&emsp;结合各个结构的定义可知，    
 
 
+- `Page_LIST_entry_t`结构包含两个指针，分别指向前一个Page和下一个Page    
 
 
+- `Page`结构中都包含着一个`Page_LIST_entry_t`结构和一个`pp_ref`，由注释可知`pp_ref`表示该页面被引用的次数。    
+
+- `Page_list`中包含一个指向一个Page结构的指针，从命名来看可以猜测该指针应是指向空闲链表头
+
+&emsp;综上可知，`page_free_list`中是我们页面链表的头节点，在此我们调用已定义好的宏对该头节点进行初始化    
+&emsp;先看看宏`LIST_INIT`和`LIST_FIRST`，    
+
+	\#define LIST_INIT(head) do {                                            
+        LIST_FIRST((head)) = NULL;                                      
+	} while (0)
+	\#define LIST_FIRST(head)        ((head)->lh_first)
+&emsp;`LIST_FIRST`指出链表的头节点，`LIST_INIT`将头节点的值初始化为`NULL`，因此我们直接将`page_free_list`的地址传给`LIST_INIT`就可以了。
+&emsp;接下来将第一个页面作为头节点插入到链表中，使用宏`LIST_INSERT_HEAD`,
+
+	\#define LIST_INSERT_HEAD(head, elm, field) 
+	do {                         
+
+        if ((LIST_NEXT((elm), field) = LIST_FIRST((head))) != NULL)
+			LIST_FIRST((head))->field.le_prev = &LIST_NEXT((elm), field);
+        LIST_FIRST((head)) = (elm);                                     
+
+        (elm)->field.le_prev = &LIST_FIRST((head));                     
+
+	} while (0)
+接下来是通过设置`pp_ref`来区分页面是否被分配，并且将空闲页面添加到链表中，而第一个页面已经分配给内核镜像，因此应该将`pp_ref`设置为1，而链表这里的操作又涉及到另外两个宏，    
 
 
- 
- 
- 
- 
- 
- 
+	\#define LIST_INSERT_BEFORE(listelm, elm, field) 
+	do {                    
+        (elm)->field.le_prev = (listelm)->field.le_prev;                
 
+        LIST_NEXT((elm), field) = (listelm);                            
 
+        *(listelm)->field.le_prev = (elm);                              
 
+        (listelm)->field.le_prev = &LIST_NEXT((elm), field);            
 
+	} while (0)
+	\#define LIST_INSERT_AFTER(listelm, elm, field) 
+	do {                     
+        if ((LIST_NEXT((elm), field) = LIST_NEXT((listelm), field)) != NULL)
 
+        	LIST_NEXT((listelm), field)->field.le_prev =            
+                    &LIST_NEXT((elm), field);       
+                    
+        LIST_NEXT((listelm), field) = (elm);        
+                    
+        (elm)->field.le_prev = &LIST_NEXT((listelm), field);            
+	} while (0)
 
+&emsp;不难看出，以上两个宏的作为均为将页面添加到链表中，区别只在于一个是将节点添加到原有节点之前，一个是将新的节点添加到原有节点之后，原理上来讲两者应该是没有区别的。如果使用后者，实验数据与指导书上的数据会有差错，因此这里使用前者。至此`page_init`函数完成。贴完整代码如下:    
 
+	void page_init(void){
+		
+		int i;
+		LIST_INIT (&page_free_list);
+        for(i=0;i<npage;i++){
+        	if(i==0){
+            	pages[i].pp_ref=1;
+            }else if(i==1){
+				pages[i].pp_ref=0;
+				LIST_INSERT_HEAD(&page_free_list,&pages[i],pp_link);
+			}
+			{
+            	pages[i].pp_ref=0;
+                LIST_INSERT_BEFORE(&pages[i-1],&pages[i],pp_link);
+        	}
+        }
+	}
 
-
-
-
-
+##3.page\_alloc和page\_free函数
 >Exercise 2.3 完成 mm/pmap.c 中的 page\_alloc 和 page\_free 函数，基于空闲内存链表page\_free\_list ，以页为单位进行物理内存的管理。    
 
-&emsp;
+###`page_alloc`函数
+&emsp;该函数的作用是从空闲链表中取出一个节点，并且为该节点映射响应的内存。可以发现以下注释:    
+
+	//pick the head of the free list
+
+    //then remove the first(head) element of the page free list :page_free_list
+‘
+则可以利用`include/types.h`中的两个宏    
+	
+	\#define LIST_FIRST(head)        ((head)->lh_first)
+
+	\#define LIST_REMOVE(elm, field) 
+	do {                                    
+        if (LIST_NEXT((elm), field) != NULL)                            
+        	LIST_NEXT((elm), field)->field.le_prev = (elm)->field.le_prev;                               
+        *(elm)->field.le_prev = LIST_NEXT((elm), field);                
+	} while (0)
+
+获得头节点并将该节点从空闲链表中移除。    
+&emsp;这个函数的亮点在于它是如何将Page结构映射到4k内存的，此处先留下这个疑问，我们后面将进行解决。    
+
+	int page_alloc(struct Page **pp)
+	{
+
+        struct Page *p=LIST_FIRST(&page_free_list);
+        if(LIST_FIRST(&page_free_list) != 0){
+        	LIST_REMOVE(p,pp_link);
+            page_initpp(p);
+            *pp=p;
+			return 0;
+		}
+		return -E_NO_MEM;
+	}
+
+###`page_free`函数
+&emsp;注释写得很明白    
+
+	//when to free a page ,just insert it to the page_free_list.
+&emsp;直接贴上代码吧。    
+
+	void page_free(struct Page *pp)
+	{
+    	LIST_INSERT_HEAD(&page_free_list,pp,pp_link);
+	}
+##4. boot\_pgdir\_walk 和 pgdir\_walk 函数

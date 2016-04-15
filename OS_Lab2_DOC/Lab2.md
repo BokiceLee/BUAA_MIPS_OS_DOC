@@ -256,3 +256,173 @@
     	LIST_INSERT_HEAD(&page_free_list,pp,pp_link);
 	}
 ##4. boot\_pgdir\_walk 和 pgdir\_walk 函数
+???????????????????????????????????????????????????????????
+###`boot_pgdir_walk`函数
+	static Pte* boot_pgdir_walk(Pde *pgdir, u_long va, int create)
+&emsp;函数的头部声明如上，其中`pgdir`为页目录，va为虚拟地址，create为标志值。
+####函数作用
+&emsp;根据页表虚拟地址`va`从二级页表结构中查找到相应的页表物理地址并返回，若发生缺失，则当`create`为1时，需要分配一个新的页面作为页表并返回，当`create`为0，则直接返回。以下根据各个作用进行分析。
+
+
+#####查找页表    
+&emsp;首先需要认识一下几个宏 / 函数:    
+
+		\#define PDX(va)         ((((u_long)(va))>>22) & 0x03FF)
+&emsp;`PDX`的作用为将虚拟地址`va`右移22位，实际上是取虚拟地址前10位，即获得虚拟地址对应的页目录索引，根据该索引可以从页目录中获得对应的二级页表的基址即物理地址;
+		
+		\#define PTE_ADDR(pte)   ((u_long)(pte)&~0xFFF)
+
+		// page number field of address
+		\#define PPN(va)         (((u_long)(va))>>12)
+
+&emsp;`PTE_ADDR`由将低12位置为0，而`PPN`则将`va`右移12位；		
+
+		\#define KADDR(pa)
+		({
+			u_long ppn = PPN(pa);
+			if (ppn >= npage)
+				panic("KADDR called with invalid pa %08lx", (u_long)pa);
+			(pa) + ULIM;
+		})
+
+		\#define ULIM 0x80000000
+&emsp;`KADDR`将二级页表的物理地址转化为内核虚拟地址。    
+
+		Pde *targetPde;
+
+        Pte *pageTable;
+
+        targetPde = (Pde *)(&pgdir[PDX(va)]);
+
+        pageTable = KADDR(PTE_ADDR(*targetPde));
+
+&emsp;说了这么多，代码只有以上几行，其中`targetPde`为根据虚拟地址`va`在页目录中获得的二级页表物理地址，而`pageTable`为根据该页表的内核虚拟地址。    
+
+#####创建页表
+&emsp;接下来根据页目录索引对应的值的有效位判断页表是否缺失，若缺失，则进行页面分配。页面分配需要调用前面写的`alloc`函数，同时为了标记为有效位，需要__与__上一个`PTE_V`,其定义如下:    
+
+	\#define PTE_V           0x0200  // Valid bit
+
+&emsp;接下来再进行一次物理地址到虚拟地址的转化以获得二级页表的虚拟地址。
+#####返回页表物理地址
+&emsp;最终，根据二级页表和页面的虚拟地址返回页面的物理地址。需要用宏`PTX`取得虚拟地址的高20位，由该索引可从二级页表中获得页表的物理地址。
+
+	\#define PTX(va)         ((((u_long)(va))>>12) & 0x03FF)
+&emsp;最终完整代码应该如下:
+
+	static Pte* boot_pgdir_walk(Pde *pgdir, u_long va, int create)
+	{
+		Pde *targetPde;
+		
+		Pte *pageTable;
+
+		targetPde = (Pde *)(&pgdir[PDX(va)]);
+
+		pageTable = KADDR(PTE_ADDR(*targetPde));
+	
+		if( *targetPde & PTE_V == 0){
+			if(create == 0)
+				
+				return 0;
+
+            else{
+				*targetPde=PADDR((struct Page*)alloc(BY2PG,BY2PG,1))|PTE_V;
+                
+				pageTable=KADDR(PTE_ADDR(*targetPde));
+			}
+
+        }
+
+        return (Pte *)(&pageTable[PTX(va)]);
+
+	}
+
+
+###`pgdir_work`函数
+&emsp;`boot_pgdir_work`函数与`pgdir_work`函数的差别不大，指导书中有以下说明：
+> 这两个函数的区别仅仅在于当虚存地址所对应的页表的页面不存在的时候，分配策略的不同和使用的内存分配函数的不同。前者用于内核刚刚启动的时候，这一部分内存通常用于存放内存控制块和进程控制块等数据结构，相关的页表和内存映射必须建立，否则操作系统内核无法正常执行后续的工作。然而用户程序的内存申请却不是必须满足的，当可用的物理内存不足时，内存分配允许出现错误。 boot_pgdir_walk 被调用时，还没有建立起空闲链表来管理物理内存，因此，直接使用 alloc 函数以字节为单位进行物理内存的分配，而 pgdir\_walk 则在空闲链表初始化之后 发挥功能，因此，直接使用 page\_alloc 函数从空闲链表中以页为单位进行内存的申请。    
+
+&emsp;因为两个函数基本实现过程相同，这里不做过多的解释，只考虑以下两点：
+
+1.因为`pgdir_walk`函数允许内存分配出现错误，因此其返回值为int型，作为分配是否成功的标志。同时函数通过对传入的指针`ppte`指向的内存值进行修改，将结果传递出去     
+2.函数中调用`page2pa`函数，定义如下：     
+	
+	static inline u_long page2pa(struct Page *pp)
+	{
+        return page2ppn(pp)<<PGSHIFT;
+	}
+
+	static inline u_long page2ppn(struct Page *pp)
+	{
+        return pp - pages;
+	}
+
+	\#define PGSHIFT         12
+????????????????????????????????????????
+
+	int pgdir_walk(Pde *pgdir, u_long va, int create, Pte **ppte)
+	{
+		Pde *targetPde;
+
+        Pte *pageTable;
+
+        struct Page *pageTablePage;
+        
+		u_long pa;
+        
+		targetPde=&pgdir[PDX(va)];
+        
+		if(!(*targetPde)){
+		
+				if(create==0){
+
+					*ppte=0;
+
+					return 0;
+                }else{
+
+					if(page_alloc(&pageTablePage)!=0){
+
+                    	return -E_NO_MEM;
+
+                    }
+
+                    pageTablePage->pp_ref++;
+
+                    pa=page2pa(pageTablePage);
+
+                    bzero(KADDR(PTE_ADDR(pa)),BY2PG);
+
+                    *targetPde=pa|PTE_V;
+                }
+        }
+        pageTable = (Pte *)KADDR(PTE_ADDR(*targetPde));
+
+        *ppte=&pageTable[PTX(va)];
+
+		return 0;
+	}
+##4.地址映射
+>Exercise 2.5 实现 mm/pmap.c 中的 boot\_map\_segment 函数，实现将制定的物理内存与虚拟内存建立起映射的功能。    
+###函数声明及作用
+	void boot_map_segment(Pde *pgdir, u_long va, u_long size, u_long pa, int perm)
+&emsp;函数的作用为将物理地址区域[pa,pa+size)映射到以pgdir为页目录的[va,va+size)虚拟地址区域中，同时设置pde和pte的权限位为perm,同时这里的size应为页面大小的整数倍，即4KB的整数倍。    
+&emsp;调用上文的`boot_pgdir_walk`函数，我们可以通过虚拟地址获取相应的页表项，将页表项设置为物理页面地址，并且为页表项设置权限位即可。
+&emsp;
+
+
+	void boot_map_segment(Pde *pgdir, u_long va, u_long size, u_long pa, int perm)
+
+	{
+
+        int nToMap,i;
+
+        Pte * pageTable;
+        for(i=0;i<size;i+=4096){
+                nToMap=va+i;
+                pageTable=boot_pgdir_walk(pgdir,nToMap,1);
+                *pageTable=((u_long)(pa+i))|perm|PTE_V;
+        }
+
+	}
+

@@ -399,7 +399,7 @@
 
 		return 0;
 	}
-##4.地址映射
+##5.地址映射
 >Exercise 2.5 实现 mm/pmap.c 中的 boot\_map\_segment 函数，实现将制定的物理内存与虚拟内存建立起映射的功能。    
 ###函数声明及作用
 	void boot_map_segment(Pde *pgdir, u_long va, u_long size, u_long pa, int perm)
